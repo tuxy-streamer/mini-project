@@ -65,7 +65,7 @@ func sendFramesToMl(fileHeaders []*multipart.FileHeader) (*http.Response, error)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", os.Getenv("MMS_URL"), &body)
+	req, err := http.NewRequest("POST", os.Getenv("MMS_FRAME_POST_URL"), &body)
 	if err != nil {
 		return nil, err
 	}
@@ -116,9 +116,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Error: Failed to load .env file.")
 	}
 
-	port := os.Getenv("PORT")
+	port := os.Getenv("SERVER_PORT")
 	if port == "" {
-		log.Fatal().Msg("Error: PORT variable not found in .env.")
+		log.Fatal().Msg("Error: SERVER_PORT variable not found in .env.")
 	}
 	port = ":" + port
 
