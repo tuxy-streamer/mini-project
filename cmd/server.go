@@ -28,12 +28,12 @@ func healthHandler(c echo.Context) error {
 func main() {
 	err := godotenv.Load(".env")
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load .env file.")
+		log.Fatal().Err(err).Msg("Error: Failed to load .env file.")
 	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		log.Fatal().Msg("PORT variable not found in .env.")
+		log.Fatal().Msg("Error: PORT variable not found in .env.")
 	}
 	port = ":" + port
 
@@ -45,6 +45,6 @@ func main() {
 
 	err = r.Start(port)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to start server.")
+		log.Fatal().Err(err).Msg("Error: Failed to start server.")
 	}
 }
