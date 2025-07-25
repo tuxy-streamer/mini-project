@@ -1,5 +1,6 @@
 # Binary folder
 bin/
+cmd/bin
 
 # Binaries for programs and plugins
 *.exe
