@@ -31,3 +31,25 @@ go.work.sum
 # Editor/IDE
 #.idea/
 .vscode/
+# Virtual environment
+fr-venv/
+
+# Downloaded models and testing
+mediapipe_models/
+model_testing/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Python cache
+tempCodeRunnerFile.py
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS generated files
+.DS_Store
+Thumbs.db
+*.tmp
+
