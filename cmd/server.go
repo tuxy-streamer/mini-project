@@ -16,11 +16,11 @@ import (
 )
 
 type FrameMetadata struct {
-	DeviceID  int16
-	CreatedAt time.Time
-	Location  string
-	Status    bool
-	ErrorMsg  string
+	DeviceID  int16     `json:"device_id"`
+	CreatedAt time.Time `json:"created_at"`
+	Location  string    `json:"location"`
+	Status    bool      `json:"status"`
+	ErrorMsg  string    `json:"error_msg"`
 }
 
 func GetIndexHandler(c echo.Context) error {
