@@ -12,10 +12,9 @@ class PredictionResponse(BaseModel):
     confidence_score: float
 
 
+res: PredictionResponse = PredictionResponse(user_id=0, confidence_score=0.0)
+
 @app.get("/attendance/recognise", response_model=PredictionResponse)
 async def get_attendance_recognise():
     """Return attendance recognition data."""
-    user_id: int = 123456789
-    confidence_score: float = 77.4
-    res: PredictionResponse = PredictionResponse(user_id, confidence_score)
     return res
