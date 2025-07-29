@@ -3,9 +3,19 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-class DummyInput(BaseModel):
-    dummy: str
 
-@app.post("/recognise")
-async def recognise(input_data: DummyInput):
-    return {"id": 123456789}
+# pylint: disable=too-few-public-methods
+class PredictionResponse(BaseModel):
+    """Prediction response schema."""
+
+    user_id: int
+    confidence_score: float
+
+
+@app.get("/attendance/recognise", response_model=PredictionResponse)
+async def get_attendance_recognise():
+    """Return attendance recognition data."""
+    user_id: int = 123456789
+    confidence_score: float = 77.4
+    res: PredictionResponse = PredictionResponse(user_id, confidence_score)
+    return res
