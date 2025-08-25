@@ -8,25 +8,43 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/rs/zerolog/log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
-type FrameMetadata struct {
-	DeviceID  int16     `json:"device_id"`
-	CreatedAt time.Time `json:"created_at"`
-	Location  string    `json:"location"`
-	Status    bool      `json:"status"`
-	ErrorMsg  string    `json:"error_msg"`
+type Frame struct {
+	ID         uint      `gorm:"primaryKey"     json:"id"`
+	UserID     int16     `gorm:"not null;index" json:"user_id"`
+	CreatedAt  time.Time `gorm:"autoCreateTime" json:"created_at"`
+	FrameBytes []byte    `gorm:"type:bytea"     json:"-"`
+}
+
+type User struct {
+	UserID    int16     `gorm:"primarykey"     json:"user_id"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 type MMSResponse struct {
 	UserID          int16   `json:"user_id"`
 	ConfidenceScore float32 `json:"confidence_score"`
+}
+
+func jsonError(c echo.Context, status int, msg string, err error) error {
+	return c.JSON(status, map[string]any{
+		"status":  "error",
+		"message": fmt.Sprintf("Error: %s: %v", msg, err),
+	})
+}
+
+func GetDB(c echo.Context) *gorm.DB {
+	return c.Get("db").(*gorm.DB)
 }
 
 func GetIndexHandler(c echo.Context) error {
@@ -40,7 +58,7 @@ func GetIndexHandler(c echo.Context) error {
 
 func GetHealthHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
-		"status": "ok",
+		"status": "success",
 	})
 }
 
@@ -76,10 +94,7 @@ func getDataFromML() (*MMSResponse, error) {
 func GetAttendancePendingHandler(c echo.Context) error {
 	data, err := getDataFromML()
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{
-			"status":  "error",
-			"message": fmt.Sprintf("Error: Failed to read MMS response: %v", err),
-		})
+		return jsonError(c, http.StatusBadGateway, "Failed to read MMS response", err)
 	}
 	if data.UserID != 0 && data.ConfidenceScore != 0.0 {
 		return c.JSON(http.StatusOK, map[string]any{
@@ -133,18 +148,12 @@ func sendFramesToMl(fileHeaders []*multipart.FileHeader) (*http.Response, error)
 func PostAttendanceNewHandler(c echo.Context) error {
 	form, err := c.MultipartForm()
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"status":  "error",
-			"message": fmt.Sprintf("Error: Failed to parse multipart form data: %v", err),
-		})
+		return jsonError(c, http.StatusBadRequest, "Failed to parse multipart form data", err)
 	}
 	files := form.File["frames"]
 	res, err := sendFramesToMl(files)
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{
-			"status":  "error",
-			"message": fmt.Sprintf("Error: Failed to send file to MMS: %v", err),
-		})
+		return jsonError(c, http.StatusBadGateway, "Failed to send file to MMS", err)
 	}
 	defer func() {
 		err := res.Body.Close()
@@ -154,14 +163,66 @@ func PostAttendanceNewHandler(c echo.Context) error {
 	}()
 	mmsResponse, err := io.ReadAll(res.Body)
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{
-			"status":  "error",
-			"message": fmt.Sprintf("Error: Failed to read MMS response: %v", err),
-		})
+		return jsonError(c, http.StatusBadGateway, "Failed to read MMS response", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":       "success",
 		"mms_response": string(mmsResponse),
+	})
+}
+
+func PostRegisterHandler(c echo.Context) error {
+	db := GetDB(c)
+
+	userIDStr := c.FormValue("user_id")
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		return jsonError(c, http.StatusBadRequest, "Invalid user_id", err)
+	}
+
+	newUser := User{
+		UserID:    int16(userID),
+		CreatedAt: time.Now(),
+	}
+	err = db.Create(&newUser).Error
+	if err != nil {
+		return jsonError(c, http.StatusInternalServerError, "Failed to save frame", err)
+	}
+
+	form, err := c.MultipartForm()
+	if err != nil {
+		return jsonError(c, http.StatusBadRequest, "Failed to parse multipartform", err)
+	}
+	fileHeaders := form.File["images"]
+	if len(fileHeaders) == 0 {
+		return jsonError(c, http.StatusBadRequest, "No frames found", err)
+	}
+	for _, fileHeader := range fileHeaders {
+		file, err := fileHeader.Open()
+		if err != nil {
+			return jsonError(c, http.StatusInternalServerError, "Failed to open image", err)
+		}
+		frameBytes, err := io.ReadAll(file)
+		if err != nil {
+			return jsonError(c, http.StatusInternalServerError, "Failed to read image", err)
+		}
+		newFrame := Frame{
+			UserID:     int16(userID),
+			CreatedAt:  time.Now(),
+			FrameBytes: frameBytes,
+		}
+		err = db.Create(&newFrame).Error
+		if err != nil {
+			return jsonError(c, http.StatusInternalServerError, "Failed to save frame", err)
+		}
+		err = file.Close()
+		if err != nil {
+			return jsonError(c, http.StatusInternalServerError, "Failed to close image", err)
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"status": "success",
 	})
 }
 
@@ -171,20 +232,42 @@ func main() {
 		log.Fatal().Err(err).Msg("Error: Failed to load .env file.")
 	}
 
-	port := os.Getenv("PORT")
+	port := os.Getenv("SERVER_PORT")
 	if port == "" {
-		log.Fatal().Msg("Error: PORT variable not found in .env.")
+		log.Fatal().Msg("Error: SERVER_PORT variable not found in .env.")
 	}
 	port = ":" + port
-
+	dsn := os.Getenv("DB_URL")
+	if dsn == "" {
+		log.Fatal().Msg("Error: SERVER_PORT variable not found in .env.")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error: Failed to connect to db.")
+	}
+	err = db.AutoMigrate(&User{}, &Frame{})
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error: Failed to run AutoMigrate.")
+	}
 	r := echo.New()
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recover())
-
+	r.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodOptions},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept"},
+	}))
+	r.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("db", db)
+			return next(c)
+		}
+	})
 	r.GET("/", GetIndexHandler)
 	r.GET("/health", GetHealthHandler)
 	r.POST("/:device/attendance/new", PostAttendanceNewHandler)
 	r.GET("/:device/attendance/pending", GetAttendancePendingHandler)
+	r.POST("/register", PostRegisterHandler)
 
 	err = r.Start(port)
 	if err != nil {
