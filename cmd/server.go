@@ -135,7 +135,7 @@ func sendFramesToMl(fileHeaders []*multipart.FileHeader) (*http.Response, error)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", os.Getenv("MMS_URL"), &body)
+	req, err := http.NewRequest("POST", os.Getenv("MMS_PREDICTION_GET_URL"), &body)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,30 @@ func PostRegisterHandler(c echo.Context) error {
 			return jsonError(c, http.StatusInternalServerError, "Failed to close image", err)
 		}
 	}
-
+	jsonData, err := json.Marshal(map[string]int16{"user_id": int16(userID)})
+	if err != nil {
+		return jsonError(c, http.StatusInternalServerError, "Failed to generate json data", err)
+	}
+	req, err := http.NewRequest(
+		"POST",
+		os.Getenv("MMS_SUCCESS_POST_URL"),
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error creating request.")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error sending request.")
+	}
+	defer func() {
+		err := res.Body.Close()
+		if err != nil {
+			log.Warn().Err(err).Msg("Warning: Failed to close response.")
+		}
+	}()
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "success",
 	})
