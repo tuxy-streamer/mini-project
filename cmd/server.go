@@ -175,8 +175,11 @@ func PostRegisterHandler(c echo.Context) error {
 	db := GetDB(c)
 
 	userIDStr := c.FormValue("user_id")
+	log.Info().Str("user_id_raw", userIDStr).Msg("Received registration request")
+
 	userID, err := strconv.Atoi(userIDStr)
 	if err != nil {
+		log.Error().Err(err).Str("user_id_raw", userIDStr).Msg("Invalid user_id format")
 		return jsonError(c, http.StatusBadRequest, "Invalid user_id", err)
 	}
 
@@ -184,66 +187,107 @@ func PostRegisterHandler(c echo.Context) error {
 		UserID:    int16(userID),
 		CreatedAt: time.Now(),
 	}
+
 	err = db.Create(&newUser).Error
 	if err != nil {
-		return jsonError(c, http.StatusInternalServerError, "Failed to save frame", err)
+		log.Error().Err(err).Int("user_id", userID).Msg("Failed to insert user")
+		return jsonError(c, http.StatusInternalServerError, "Failed to insert user", err)
 	}
+	log.Info().Int("user_id", userID).Msg("User inserted successfully")
 
 	form, err := c.MultipartForm()
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to parse multipart form")
 		return jsonError(c, http.StatusBadRequest, "Failed to parse multipartform", err)
 	}
+
 	fileHeaders := form.File["images"]
 	if len(fileHeaders) == 0 {
-		return jsonError(c, http.StatusBadRequest, "No frames found", err)
+		log.Warn().Msg("No frames found in form data")
+		return jsonError(c, http.StatusBadRequest, "No frames found", nil)
 	}
-	for _, fileHeader := range fileHeaders {
+
+	log.Info().
+		Int("frame_count", len(fileHeaders)).
+		Int("user_id", userID).
+		Msg("Received image frames")
+
+	for i, fileHeader := range fileHeaders {
 		file, err := fileHeader.Open()
 		if err != nil {
+			log.Error().Err(err).Str("filename", fileHeader.Filename).Msg("Failed to open image")
 			return jsonError(c, http.StatusInternalServerError, "Failed to open image", err)
 		}
+
 		frameBytes, err := io.ReadAll(file)
 		if err != nil {
+			log.Error().
+				Err(err).
+				Str("filename", fileHeader.Filename).
+				Msg("Failed to read image bytes")
 			return jsonError(c, http.StatusInternalServerError, "Failed to read image", err)
 		}
+
 		newFrame := Frame{
 			UserID:     int16(userID),
 			CreatedAt:  time.Now(),
 			FrameBytes: frameBytes,
 		}
+
 		err = db.Create(&newFrame).Error
 		if err != nil {
+			log.Error().
+				Err(err).
+				Str("filename", fileHeader.Filename).
+				Msg("Failed to save frame to database")
 			return jsonError(c, http.StatusInternalServerError, "Failed to save frame", err)
 		}
-		err = file.Close()
-		if err != nil {
+
+		log.Info().
+			Int("user_id", userID).
+			Int("frame_index", i).
+			Int("frame_size", len(frameBytes)).
+			Msg("Frame saved to DB successfully")
+
+		if err = file.Close(); err != nil {
+			log.Warn().
+				Err(err).
+				Str("filename", fileHeader.Filename).
+				Msg("Failed to close image file")
 			return jsonError(c, http.StatusInternalServerError, "Failed to close image", err)
 		}
 	}
+
 	jsonData, err := json.Marshal(map[string]int16{"user_id": int16(userID)})
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal JSON for MMS request")
 		return jsonError(c, http.StatusInternalServerError, "Failed to generate json data", err)
 	}
+
 	req, err := http.NewRequest(
 		"POST",
 		os.Getenv("MMS_SUCCESS_POST_URL"),
 		bytes.NewBuffer(jsonData),
 	)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error creating request.")
+		log.Fatal().Err(err).Msg("Error creating MMS request")
 	}
+
 	req.Header.Set("Content-Type", "application/json")
+
 	client := &http.Client{}
 	res, err := client.Do(req)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error sending request.")
+		log.Fatal().Err(err).Msg("Error sending request to MMS")
 	}
 	defer func() {
-		err := res.Body.Close()
-		if err != nil {
-			log.Warn().Err(err).Msg("Warning: Failed to close response.")
+		if err := res.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Warning: Failed to close MMS response body")
 		}
 	}()
+
+	log.Info().Int("user_id", userID).Msg("MMS notified successfully")
+
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "success",
 	})
